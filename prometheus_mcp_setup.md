@@ -1,3 +1,6 @@
+# About Prometheus
+Prometheus is an open-source systems monitoring and alerting toolkit designed for reliability and scalability. It collects and stores metrics as time series data, providing powerful query capabilities. Prometheus is widely used for monitoring applications, infrastructure, and cloud-native environments.
+
 # Prometheus MCP Server Setup with Spring Boot
 
 This guide walks through setting up a Prometheus MCP (Model Context Protocol) server with a Spring Boot application for monitoring and metrics collection.
