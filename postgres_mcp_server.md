@@ -1,6 +1,5 @@
 docker run -d -p 5432:5432 --name postgres-container -e POSTGRES_PASSWORD=postgres123 -e POSTGRES_DB=productsdb postgres:latest
 
-
 # productsdb — PostgreSQL Schema & Sample Data
 
 > Complete schema with `CREATE TABLE` and `INSERT` statements for all 6 tables.  
@@ -514,6 +513,446 @@ FROM customers c
 LEFT JOIN orders o ON c.customer_id = o.customer_id
 GROUP BY c.customer_id, c.first_name, c.last_name, c.email
 ORDER BY lifetime_value DESC;
+```
+
+---
+
+## MCP Prompts & SQL Queries
+
+Ready-to-use natural language prompts and their matching PostgreSQL queries.  
+All tables are prefixed with `productsdb.` schema.
+
+---
+
+### Basic Lookups
+
+**"Show me all products with their category names and stock quantity"**
+```sql
+SELECT
+    p.product_id,
+    p.name          AS product_name,
+    c.name          AS category,
+    p.brand,
+    p.price,
+    p.stock_qty
+FROM productsdb.products p
+JOIN productsdb.categories c ON p.category_id = c.category_id
+ORDER BY c.name, p.name;
+```
+
+---
+
+**"List all customers with their city and state"**
+```sql
+SELECT
+    customer_id,
+    first_name || ' ' || last_name AS customer_name,
+    email,
+    city,
+    state,
+    pincode
+FROM productsdb.customers
+ORDER BY state, city;
+```
+
+---
+
+**"Get all orders placed in November 2024 sorted by order date"**
+```sql
+SELECT
+    o.order_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    o.status,
+    o.total_amount,
+    o.payment_method,
+    o.ordered_at
+FROM productsdb.orders o
+JOIN productsdb.customers c ON o.customer_id = c.customer_id
+WHERE o.ordered_at BETWEEN '2024-11-01' AND '2024-11-30'
+ORDER BY o.ordered_at;
+```
+
+---
+
+**"Show me all active products in the Electronics category"**
+```sql
+SELECT
+    p.product_id,
+    p.name,
+    p.brand,
+    p.price,
+    p.stock_qty,
+    p.sku
+FROM productsdb.products p
+JOIN productsdb.categories c ON p.category_id = c.category_id
+WHERE c.name = 'Electronics'
+  AND p.is_active = TRUE
+ORDER BY p.price DESC;
+```
+
+---
+
+### Filtering & Searching
+
+**"Find all products priced between ₹1000 and ₹10000 sorted by price"**
+```sql
+SELECT
+    p.name,
+    p.brand,
+    c.name  AS category,
+    p.price,
+    p.stock_qty
+FROM productsdb.products p
+JOIN productsdb.categories c ON p.category_id = c.category_id
+WHERE p.price BETWEEN 1000 AND 10000
+ORDER BY p.price ASC;
+```
+
+---
+
+**"Which customers are from Maharashtra?"**
+```sql
+SELECT
+    customer_id,
+    first_name || ' ' || last_name AS customer_name,
+    email,
+    phone,
+    city,
+    pincode
+FROM productsdb.customers
+WHERE state = 'Maharashtra'
+ORDER BY city;
+```
+
+---
+
+**"Show me all orders that have been cancelled or refunded"**
+```sql
+SELECT
+    o.order_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    o.status,
+    o.total_amount,
+    o.payment_method,
+    o.payment_status,
+    o.ordered_at
+FROM productsdb.orders o
+JOIN productsdb.customers c ON o.customer_id = c.customer_id
+WHERE o.status IN ('cancelled', 'refunded')
+ORDER BY o.ordered_at DESC;
+```
+
+---
+
+**"Find products with stock below 50 that may need reordering"**
+```sql
+SELECT
+    p.product_id,
+    p.sku,
+    p.name,
+    p.brand,
+    c.name  AS category,
+    p.stock_qty
+FROM productsdb.products p
+JOIN productsdb.categories c ON p.category_id = c.category_id
+WHERE p.stock_qty < 50
+  AND p.is_active = TRUE
+ORDER BY p.stock_qty ASC;
+```
+
+---
+
+### Aggregations & Analytics
+
+**"What is the total revenue from delivered orders?"**
+```sql
+SELECT
+    COUNT(order_id)       AS total_orders,
+    SUM(total_amount)     AS total_revenue,
+    ROUND(AVG(total_amount), 2) AS avg_order_value
+FROM productsdb.orders
+WHERE status = 'delivered'
+  AND payment_status = 'paid';
+```
+
+---
+
+**"Which product has been ordered the most times?"**
+```sql
+SELECT
+    p.product_id,
+    p.name,
+    p.brand,
+    COUNT(oi.order_item_id) AS times_ordered,
+    SUM(oi.quantity)        AS total_units_sold
+FROM productsdb.order_items oi
+JOIN productsdb.products p ON oi.product_id = p.product_id
+GROUP BY p.product_id, p.name, p.brand
+ORDER BY total_units_sold DESC
+LIMIT 5;
+```
+
+---
+
+**"Show the top 5 highest spending customers"**
+```sql
+SELECT
+    c.customer_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    c.city,
+    COUNT(o.order_id)       AS total_orders,
+    SUM(o.total_amount)     AS lifetime_value
+FROM productsdb.customers c
+JOIN productsdb.orders o ON c.customer_id = o.customer_id
+WHERE o.status != 'cancelled'
+GROUP BY c.customer_id, c.first_name, c.last_name, c.city
+ORDER BY lifetime_value DESC
+LIMIT 5;
+```
+
+---
+
+**"What is the average rating for each product with at least one review?"**
+```sql
+SELECT
+    p.product_id,
+    p.name,
+    p.brand,
+    ROUND(AVG(r.rating), 2) AS avg_rating,
+    COUNT(r.review_id)      AS review_count,
+    MIN(r.rating)           AS lowest_rating,
+    MAX(r.rating)           AS highest_rating
+FROM productsdb.products p
+JOIN productsdb.reviews r ON p.product_id = r.product_id
+GROUP BY p.product_id, p.name, p.brand
+HAVING COUNT(r.review_id) >= 1
+ORDER BY avg_rating DESC;
+```
+
+---
+
+**"How many orders are in each status?"**
+```sql
+SELECT
+    status,
+    COUNT(order_id)     AS order_count,
+    SUM(total_amount)   AS total_value
+FROM productsdb.orders
+GROUP BY status
+ORDER BY order_count DESC;
+```
+
+---
+
+### Joins Across Tables
+
+**"Show each order with customer name, products ordered, and total"**
+```sql
+SELECT
+    o.order_id,
+    c.first_name || ' ' || c.last_name  AS customer_name,
+    p.name                               AS product,
+    oi.quantity,
+    oi.unit_price,
+    oi.discount,
+    oi.subtotal,
+    o.status,
+    o.ordered_at
+FROM productsdb.orders o
+JOIN productsdb.customers c    ON o.customer_id  = c.customer_id
+JOIN productsdb.order_items oi ON o.order_id     = oi.order_id
+JOIN productsdb.products p     ON oi.product_id  = p.product_id
+ORDER BY o.order_id, p.name;
+```
+
+---
+
+**"Which customers have never placed an order?"**
+```sql
+SELECT
+    c.customer_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    c.email,
+    c.city
+FROM productsdb.customers c
+LEFT JOIN productsdb.orders o ON c.customer_id = o.customer_id
+WHERE o.order_id IS NULL;
+```
+
+---
+
+**"List all reviews with reviewer name, product, rating and title"**
+```sql
+SELECT
+    r.review_id,
+    c.first_name || ' ' || c.last_name AS reviewer,
+    p.name                              AS product,
+    p.brand,
+    r.rating,
+    r.title,
+    r.is_verified,
+    r.helpful_count,
+    r.created_at
+FROM productsdb.reviews r
+JOIN productsdb.customers c ON r.customer_id = c.customer_id
+JOIN productsdb.products p  ON r.product_id  = p.product_id
+ORDER BY r.rating DESC, r.helpful_count DESC;
+```
+
+---
+
+**"Show order items where a discount was applied"**
+```sql
+SELECT
+    o.order_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    p.name                              AS product,
+    oi.unit_price,
+    oi.discount,
+    oi.subtotal,
+    ROUND((oi.discount / oi.unit_price) * 100, 1) AS discount_pct
+FROM productsdb.order_items oi
+JOIN productsdb.orders o    ON oi.order_id    = o.order_id
+JOIN productsdb.customers c ON o.customer_id  = c.customer_id
+JOIN productsdb.products p  ON oi.product_id  = p.product_id
+WHERE oi.discount > 0
+ORDER BY oi.discount DESC;
+```
+
+---
+
+### Business Insights
+
+**"Which category has generated the most revenue?"**
+```sql
+SELECT
+    c.name              AS category,
+    COUNT(DISTINCT o.order_id)  AS total_orders,
+    SUM(oi.subtotal)             AS total_revenue
+FROM productsdb.order_items oi
+JOIN productsdb.products p     ON oi.product_id  = p.product_id
+JOIN productsdb.categories c   ON p.category_id  = c.category_id
+JOIN productsdb.orders o       ON oi.order_id    = o.order_id
+WHERE o.status != 'cancelled'
+GROUP BY c.name
+ORDER BY total_revenue DESC;
+```
+
+---
+
+**"Show products that have been ordered but never reviewed"**
+```sql
+SELECT
+    p.product_id,
+    p.name,
+    p.brand,
+    COUNT(oi.order_item_id) AS times_ordered
+FROM productsdb.products p
+JOIN productsdb.order_items oi ON p.product_id = oi.product_id
+LEFT JOIN productsdb.reviews r  ON p.product_id = r.product_id
+WHERE r.review_id IS NULL
+GROUP BY p.product_id, p.name, p.brand
+ORDER BY times_ordered DESC;
+```
+
+---
+
+**"What is the average order value per payment method?"**
+```sql
+SELECT
+    payment_method,
+    COUNT(order_id)             AS total_orders,
+    ROUND(AVG(total_amount), 2) AS avg_order_value,
+    SUM(total_amount)           AS total_revenue
+FROM productsdb.orders
+WHERE payment_status = 'paid'
+GROUP BY payment_method
+ORDER BY total_revenue DESC;
+```
+
+---
+
+**"Which brand has the highest average product rating?"**
+```sql
+SELECT
+    p.brand,
+    COUNT(DISTINCT p.product_id)    AS products_reviewed,
+    ROUND(AVG(r.rating), 2)         AS avg_rating,
+    COUNT(r.review_id)              AS total_reviews
+FROM productsdb.products p
+JOIN productsdb.reviews r ON p.product_id = r.product_id
+GROUP BY p.brand
+HAVING COUNT(r.review_id) >= 2
+ORDER BY avg_rating DESC;
+```
+
+---
+
+**"Find customers who have placed more than one order"**
+```sql
+SELECT
+    c.customer_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    c.email,
+    c.city,
+    COUNT(o.order_id)   AS order_count,
+    SUM(o.total_amount) AS lifetime_value
+FROM productsdb.customers c
+JOIN productsdb.orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.first_name, c.last_name, c.email, c.city
+HAVING COUNT(o.order_id) > 1
+ORDER BY order_count DESC;
+```
+
+---
+
+### Data Integrity Checks
+
+**"Are there order totals that don't match the sum of their order_items?"**
+```sql
+SELECT
+    o.order_id,
+    o.total_amount              AS recorded_total,
+    SUM(oi.subtotal)            AS calculated_total,
+    o.total_amount - SUM(oi.subtotal) AS difference
+FROM productsdb.orders o
+JOIN productsdb.order_items oi ON o.order_id = oi.order_id
+GROUP BY o.order_id, o.total_amount
+HAVING o.total_amount != SUM(oi.subtotal)
+ORDER BY difference DESC;
+```
+
+---
+
+**"Show products that have reviews but are currently inactive"**
+```sql
+SELECT
+    p.product_id,
+    p.name,
+    p.brand,
+    p.is_active,
+    COUNT(r.review_id)      AS review_count,
+    ROUND(AVG(r.rating), 2) AS avg_rating
+FROM productsdb.products p
+JOIN productsdb.reviews r ON p.product_id = r.product_id
+WHERE p.is_active = FALSE
+GROUP BY p.product_id, p.name, p.brand, p.is_active;
+```
+
+---
+
+**"Find delivered orders with a NULL delivered_at timestamp"**
+```sql
+SELECT
+    o.order_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    o.status,
+    o.ordered_at,
+    o.delivered_at
+FROM productsdb.orders o
+JOIN productsdb.customers c ON o.customer_id = c.customer_id
+WHERE o.status = 'delivered'
+  AND o.delivered_at IS NULL;
 ```
 
 ---
