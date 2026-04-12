@@ -61,6 +61,12 @@ docker exec -i postgres-container psql -U postgres -d postgres < productsdb.sql
 
 ---
 
+## mcp docker command
+
+```
+docker run -i --rm --add-host host.docker.internal:host-gateway -e PGEDGE_DB_HOST=host.docker.internal -e PGEDGE_DB_PORT=5432 -e PGEDGE_DB_NAME=postgres -e PGEDGE_DB_USER=postgres -e PGEDGE_DB_PASSWORD=postgres123 ghcr.io/pgedge/postgres-mcp:latest
+```
+
 ## Step 2 — MCP Server Configuration
 
 Add this to your MCP client config file (e.g. Claude Desktop `claude_desktop_config.json` or your ADK config):
