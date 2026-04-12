@@ -1,40 +1,148 @@
-docker run -d -p 5432:5432 --name postgres-container -e POSTGRES_PASSWORD=postgres123 -e POSTGRES_DB=productsdb postgres:latest
+# PostgreSQL MCP Server — Complete Setup Guide
 
-# productsdb — PostgreSQL Schema & Sample Data
-
-> Complete schema with `CREATE TABLE` and `INSERT` statements for all 6 tables.  
-> Run with: `psql -U postgres -f productsdb.sql`
+> End-to-end guide: start PostgreSQL with Docker → load sample data → configure MCP servers → query with natural language via Google ADK agent.
 
 ---
 
 ## Table of Contents
 
-- [Setup](#setup)
-- [1. categories](#1-categories)
-- [2. customers](#2-customers)
-- [3. products](#3-products)
-- [4. orders](#4-orders)
-- [5. order\_items](#5-order_items)
-- [6. reviews](#6-reviews)
-- [Bonus Views](#bonus-views)
+- [Step 1 — Start PostgreSQL with Docker](#step-1--start-postgresql-with-docker)
+- [Step 2 — MCP Server Configuration](#step-2--mcp-server-configuration)
+- [Step 3 — Database Schema & Sample Data](#step-3--database-schema--sample-data)
+  - [1. categories](#1-categories)
+  - [2. customers](#2-customers)
+  - [3. products](#3-products)
+  - [4. orders](#4-orders)
+  - [5. order_items](#5-order_items)
+  - [6. reviews](#6-reviews)
+  - [Bonus Views](#bonus-views)
+- [Step 4 — Google ADK Agent Script](#step-4--google-adk-agent-script)
+- [Step 5 — MCP Prompts & SQL Queries](#step-5--mcp-prompts--sql-queries)
 - [Schema Overview](#schema-overview)
 
 ---
 
-## Setup
+## Step 1 — Start PostgreSQL with Docker
 
-```sql
-CREATE DATABASE productsdb;
-\c productsdb;
+Pull and start a PostgreSQL container with the `postgres` database exposed on port 5432.
+
+```bash
+docker run -d \
+  -p 5432:5432 \
+  --name postgres-container \
+  -e POSTGRES_PASSWORD=postgres123 \
+  -e POSTGRES_DB=postgres \
+  postgres:latest
+```
+
+> **Windows users** — replace the `\` line continuation with `^` in CMD, or use a single line in PowerShell.
+
+**Verify the container is running:**
+
+```bash
+docker ps
+```
+
+**Connect and verify (optional):**
+
+```bash
+docker exec -it postgres-container psql -U postgres
+```
+
+**Load the SQL file directly via Docker:**
+
+```bash
+docker exec -i postgres-container psql -U postgres -d postgres < productsdb.sql
 ```
 
 ---
 
-## 1. categories
+## Step 2 — MCP Server Configuration
+
+Add this to your MCP client config file (e.g. Claude Desktop `claude_desktop_config.json` or your ADK config):
+
+```json
+{
+  "mcpServers": {
+    "pgedge": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--add-host", "host.docker.internal:host-gateway",
+        "-e", "PGEDGE_DB_HOST=host.docker.internal",
+        "-e", "PGEDGE_DB_PORT=5432",
+        "-e", "PGEDGE_DB_NAME=postgres",
+        "-e", "PGEDGE_DB_USER=postgres",
+        "-e", "PGEDGE_DB_PASSWORD=postgres123",
+        "ghcr.io/pgedge/postgres-mcp:latest"
+      ]
+    },
+    "mcp_server_mysql": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@benborla29/mcp-server-mysql"
+      ],
+      "env": {
+        "MYSQL_HOST": "localhost",
+        "MYSQL_PORT": "3306",
+        "MYSQL_USER": "root",
+        "MYSQL_PASS": "root123",
+        "MYSQL_DB": "demo_company",
+        "ALLOW_INSERT_OPERATION": "false",
+        "ALLOW_UPDATE_OPERATION": "false",
+        "ALLOW_DELETE_OPERATION": "false"
+      }
+    }
+  },
+  "preferences": {
+    "coworkWebSearchEnabled": true,
+    "coworkScheduledTasksEnabled": false,
+    "ccdScheduledTasksEnabled": true,
+    "sidebarMode": "chat"
+  }
+}
+```
+
+**Pull the pgedge MCP Docker image before first run:**
+
+```bash
+docker pull ghcr.io/pgedge/postgres-mcp:latest
+```
+
+**Install MySQL MCP server (for MySQL connectivity):**
+
+```bash
+npm install -g @benborla29/mcp-server-mysql
+```
+
+---
+
+## Step 3 — Database Schema & Sample Data
+
+> Connect to the `postgres` database before running. Tables go into the `public` schema — no prefix needed.
+
+**Reset script (run to wipe and reload cleanly):**
+
+```sql
+-- Drop tables in reverse FK dependency order
+DROP TABLE IF EXISTS reviews     CASCADE;
+DROP TABLE IF EXISTS order_items CASCADE;
+DROP TABLE IF EXISTS orders      CASCADE;
+DROP TABLE IF EXISTS products    CASCADE;
+DROP TABLE IF EXISTS categories  CASCADE;
+DROP TABLE IF EXISTS customers   CASCADE;
+```
+
+---
+
+### 1. categories
 
 Hierarchical category tree — supports parent/child via `parent_id` self-reference.
 
-### Schema
+#### Schema
 
 ```sql
 CREATE TABLE categories (
@@ -46,7 +154,7 @@ CREATE TABLE categories (
 );
 ```
 
-### Column Reference
+#### Column Reference
 
 | Column | Type | Notes |
 |---|---|---|
@@ -56,7 +164,7 @@ CREATE TABLE categories (
 | `parent_id` | INT | Self-reference for sub-categories |
 | `created_at` | TIMESTAMP | Auto-set on insert |
 
-### Insert Statements
+#### Insert Statements
 
 ```sql
 INSERT INTO categories (name, description, parent_id) VALUES
@@ -72,7 +180,7 @@ INSERT INTO categories (name, description, parent_id) VALUES
     ('Toys',            'Toys and games for all ages',                NULL);
 ```
 
-### Sample Data
+#### Sample Data
 
 | category_id | name | description | parent_id |
 |---|---|---|---|
@@ -89,11 +197,11 @@ INSERT INTO categories (name, description, parent_id) VALUES
 
 ---
 
-## 2. customers
+### 2. customers
 
 Stores customer profile and contact information.
 
-### Schema
+#### Schema
 
 ```sql
 CREATE TABLE customers (
@@ -111,7 +219,7 @@ CREATE TABLE customers (
 );
 ```
 
-### Column Reference
+#### Column Reference
 
 | Column | Type | Notes |
 |---|---|---|
@@ -127,7 +235,7 @@ CREATE TABLE customers (
 | `pincode` | VARCHAR(10) | Postal code |
 | `created_at` | TIMESTAMP | Auto-set on insert |
 
-### Insert Statements
+#### Insert Statements
 
 ```sql
 INSERT INTO customers (first_name, last_name, email, phone, address, city, state, country, pincode) VALUES
@@ -143,7 +251,7 @@ INSERT INTO customers (first_name, last_name, email, phone, address, city, state
     ('Pooja',   'Kulkarni', 'pooja.kulkarni@email.com', '9801234567', '67 FC Road',          'Pune',      'Maharashtra', 'India', '411004');
 ```
 
-### Sample Data
+#### Sample Data
 
 | customer_id | name | email | city | state |
 |---|---|---|---|---|
@@ -160,11 +268,11 @@ INSERT INTO customers (first_name, last_name, email, phone, address, city, state
 
 ---
 
-## 3. products
+### 3. products
 
 Product catalogue with pricing, stock, and SKU tracking.
 
-### Schema
+#### Schema
 
 ```sql
 CREATE TABLE products (
@@ -182,7 +290,7 @@ CREATE TABLE products (
 );
 ```
 
-### Column Reference
+#### Column Reference
 
 | Column | Type | Notes |
 |---|---|---|
@@ -198,33 +306,33 @@ CREATE TABLE products (
 | `is_active` | BOOLEAN | Defaults to `TRUE` |
 | `created_at` | TIMESTAMP | Auto-set on insert |
 
-### Insert Statements
+#### Insert Statements
 
 ```sql
 INSERT INTO products (category_id, name, description, price, stock_qty, sku, brand, is_active) VALUES
-    (2,  'Dell Inspiron 15',         '15.6" FHD laptop, Intel i5, 16GB RAM, 512GB SSD',          65999.00,  30,  'SKU-LAP-001', 'Dell',          TRUE),
-    (2,  'HP Pavilion x360',         '14" touch 2-in-1, Ryzen 5, 8GB RAM, 256GB SSD',            58499.00,  25,  'SKU-LAP-002', 'HP',            TRUE),
-    (2,  'Logitech MX Master 3',     'Advanced wireless mouse for professionals',                  8999.00,  80,  'SKU-PER-001', 'Logitech',      TRUE),
-    (2,  'Mechanical Keyboard RGB',  'Tenkeyless mechanical keyboard with Cherry MX switches',    4499.00,   60,  'SKU-PER-002', 'Keychron',      TRUE),
-    (3,  'Samsung Galaxy S24',       '6.1" AMOLED, Snapdragon 8 Gen 3, 128GB',                  74999.00,   50,  'SKU-MOB-001', 'Samsung',       TRUE),
-    (3,  'iPhone 15',                '6.1" Super Retina XDR, A16 Bionic, 128GB',                79999.00,   40,  'SKU-MOB-002', 'Apple',         TRUE),
-    (3,  'OnePlus 12',               '6.82" LTPO AMOLED, Snapdragon 8 Gen 3, 256GB',            64999.00,   35,  'SKU-MOB-003', 'OnePlus',       TRUE),
-    (5,  'Men''s Slim Fit Shirt',    '100% cotton slim fit formal shirt',                         1299.00, 150,  'SKU-CLT-001', 'Raymond',       TRUE),
-    (5,  'Men''s Chino Trousers',    'Stretch chino trousers, available in 4 colours',            1899.00, 120,  'SKU-CLT-002', 'Arrow',         TRUE),
-    (6,  'Women''s Kurta Set',       'Embroidered cotton kurta with palazzo pants',               2499.00,  90,  'SKU-CLT-003', 'Biba',          TRUE),
-    (7,  'Stainless Steel Cookware', '5-piece non-stick cookware set with glass lids',            3999.00,  45,  'SKU-HOM-001', 'Prestige',      TRUE),
-    (7,  'Electric Kettle 1.7L',     '1500W stainless steel kettle with auto shut-off',           1299.00,  70,  'SKU-HOM-002', 'Philips',       TRUE),
-    (8,  'Atomic Habits',            'James Clear — build good habits, break bad ones',            499.00, 200,  'SKU-BOK-001', 'Penguin',       TRUE),
-    (8,  'The Alchemist',            'Paulo Coelho — international bestseller',                    299.00, 180,  'SKU-BOK-002', 'HarperCollins', TRUE),
-    (9,  'Yoga Mat 6mm',             'Anti-slip TPE yoga mat with carry strap',                   1199.00,  95,  'SKU-SPT-001', 'Boldfit',       TRUE),
-    (9,  'Resistance Bands Set',     'Set of 5 latex resistance bands (5–40 lbs)',                 799.00, 110,  'SKU-SPT-002', 'Fitkit',        TRUE),
-    (10, 'LEGO Classic Bricks',      'Creative building bricks set, 790 pieces, age 4+',         3499.00,  55,  'SKU-TOY-001', 'LEGO',          TRUE),
-    (10, 'Remote Control Car',       '1:16 scale RC car with 2.4GHz control, 30km/h',            1999.00,  65,  'SKU-TOY-002', 'Webby',         TRUE),
-    (1,  'Sony WH-1000XM5',         'Industry-leading noise cancelling wireless headphones',    29999.00,  40,  'SKU-ELC-001', 'Sony',          TRUE),
-    (1,  'Anker 65W GaN Charger',   'Compact 3-port GaN charger (2x USB-C, 1x USB-A)',          2999.00, 100,  'SKU-ELC-002', 'Anker',         TRUE);
+    (2,  'Dell Inspiron 15',         '15.6" FHD laptop, Intel i5, 16GB RAM, 512GB SSD',          65999.00,  30, 'SKU-LAP-001', 'Dell',          TRUE),
+    (2,  'HP Pavilion x360',         '14" touch 2-in-1, Ryzen 5, 8GB RAM, 256GB SSD',            58499.00,  25, 'SKU-LAP-002', 'HP',            TRUE),
+    (2,  'Logitech MX Master 3',     'Advanced wireless mouse for professionals',                  8999.00,  80, 'SKU-PER-001', 'Logitech',      TRUE),
+    (2,  'Mechanical Keyboard RGB',  'Tenkeyless mechanical keyboard with Cherry MX switches',    4499.00,   60, 'SKU-PER-002', 'Keychron',      TRUE),
+    (3,  'Samsung Galaxy S24',       '6.1" AMOLED, Snapdragon 8 Gen 3, 128GB',                  74999.00,  50, 'SKU-MOB-001', 'Samsung',       TRUE),
+    (3,  'iPhone 15',                '6.1" Super Retina XDR, A16 Bionic, 128GB',                79999.00,  40, 'SKU-MOB-002', 'Apple',         TRUE),
+    (3,  'OnePlus 12',               '6.82" LTPO AMOLED, Snapdragon 8 Gen 3, 256GB',            64999.00,  35, 'SKU-MOB-003', 'OnePlus',       TRUE),
+    (5,  'Men''s Slim Fit Shirt',    '100% cotton slim fit formal shirt',                         1299.00, 150, 'SKU-CLT-001', 'Raymond',       TRUE),
+    (5,  'Men''s Chino Trousers',    'Stretch chino trousers, available in 4 colours',            1899.00, 120, 'SKU-CLT-002', 'Arrow',         TRUE),
+    (6,  'Women''s Kurta Set',       'Embroidered cotton kurta with palazzo pants',               2499.00,  90, 'SKU-CLT-003', 'Biba',          TRUE),
+    (7,  'Stainless Steel Cookware', '5-piece non-stick cookware set with glass lids',            3999.00,  45, 'SKU-HOM-001', 'Prestige',      TRUE),
+    (7,  'Electric Kettle 1.7L',     '1500W stainless steel kettle with auto shut-off',           1299.00,  70, 'SKU-HOM-002', 'Philips',       TRUE),
+    (8,  'Atomic Habits',            'James Clear — build good habits, break bad ones',            499.00, 200, 'SKU-BOK-001', 'Penguin',       TRUE),
+    (8,  'The Alchemist',            'Paulo Coelho — international bestseller',                    299.00, 180, 'SKU-BOK-002', 'HarperCollins', TRUE),
+    (9,  'Yoga Mat 6mm',             'Anti-slip TPE yoga mat with carry strap',                   1199.00,  95, 'SKU-SPT-001', 'Boldfit',       TRUE),
+    (9,  'Resistance Bands Set',     'Set of 5 latex resistance bands (5–40 lbs)',                 799.00, 110, 'SKU-SPT-002', 'Fitkit',        TRUE),
+    (10, 'LEGO Classic Bricks',      'Creative building bricks set, 790 pieces, age 4+',         3499.00,  55, 'SKU-TOY-001', 'LEGO',          TRUE),
+    (10, 'Remote Control Car',       '1:16 scale RC car with 2.4GHz control, 30km/h',            1999.00,  65, 'SKU-TOY-002', 'Webby',         TRUE),
+    (1,  'Sony WH-1000XM5',         'Industry-leading noise cancelling wireless headphones',    29999.00,  40, 'SKU-ELC-001', 'Sony',          TRUE),
+    (1,  'Anker 65W GaN Charger',   'Compact 3-port GaN charger (2x USB-C, 1x USB-A)',          2999.00, 100, 'SKU-ELC-002', 'Anker',         TRUE);
 ```
 
-### Sample Data
+#### Sample Data
 
 | product_id | name | brand | price (₹) | stock | sku |
 |---|---|---|---|---|---|
@@ -251,11 +359,11 @@ INSERT INTO products (category_id, name, description, price, stock_qty, sku, bra
 
 ---
 
-## 4. orders
+### 4. orders
 
 Order header records. Each order belongs to one customer.
 
-### Schema
+#### Schema
 
 ```sql
 CREATE TABLE orders (
@@ -273,7 +381,7 @@ CREATE TABLE orders (
 );
 ```
 
-### Column Reference
+#### Column Reference
 
 | Column | Type | Notes |
 |---|---|---|
@@ -287,7 +395,7 @@ CREATE TABLE orders (
 | `ordered_at` | TIMESTAMP | When order was placed |
 | `delivered_at` | TIMESTAMP | When order was delivered (nullable) |
 
-### Insert Statements
+#### Insert Statements
 
 ```sql
 INSERT INTO orders (customer_id, status, total_amount, shipping_addr, payment_method, payment_status, ordered_at, delivered_at) VALUES
@@ -303,7 +411,7 @@ INSERT INTO orders (customer_id, status, total_amount, shipping_addr, payment_me
     (10, 'shipped',    64999.00, '67 FC Road, Pune 411004',             'EMI',         'paid',     '2024-11-11 14:35:00', NULL);
 ```
 
-### Sample Data
+#### Sample Data
 
 | order_id | customer_id | status | total (₹) | payment_method | payment_status |
 |---|---|---|---|---|---|
@@ -320,11 +428,11 @@ INSERT INTO orders (customer_id, status, total_amount, shipping_addr, payment_me
 
 ---
 
-## 5. order_items
+### 5. order_items
 
 Line items for each order. `subtotal` is a generated (computed) column.
 
-### Schema
+#### Schema
 
 ```sql
 CREATE TABLE order_items (
@@ -338,7 +446,7 @@ CREATE TABLE order_items (
 );
 ```
 
-### Column Reference
+#### Column Reference
 
 | Column | Type | Notes |
 |---|---|---|
@@ -350,7 +458,7 @@ CREATE TABLE order_items (
 | `discount` | NUMERIC(10,2) | Item-level discount in ₹ |
 | `subtotal` | NUMERIC(12,2) | **Generated** = `(quantity × unit_price) − discount` |
 
-### Insert Statements
+#### Insert Statements
 
 ```sql
 INSERT INTO order_items (order_id, product_id, quantity, unit_price, discount) VALUES
@@ -385,28 +493,24 @@ INSERT INTO order_items (order_id, product_id, quantity, unit_price, discount) V
     (10, 7,  1, 64999.00,    0.00);
 ```
 
-### Sample Data
+#### Sample Data
 
-| order_item_id | order_id | product_id | qty | unit_price (₹) | discount (₹) | subtotal (₹) |
+| order_item_id | order_id | product | qty | unit_price (₹) | discount (₹) | subtotal (₹) |
 |---|---|---|---|---|---|---|
-| 1 | 1 | 5 — Samsung Galaxy S24 | 1 | 74,999 | 1,000 | 73,999 |
-| 2 | 1 | 20 — Anker Charger | 1 | 2,999 | 500 | 2,499 |
-| 3 | 2 | 6 — iPhone 15 | 1 | 79,999 | 0 | 79,999 |
-| 4 | 3 | 1 — Dell Inspiron | 1 | 65,999 | 500 | 65,499 |
-| 5 | 3 | 3 — Logitech Mouse | 1 | 8,999 | 1,000 | 7,999 |
-| 6 | 3 | 4 — Keyboard | 1 | 4,499 | 3,200 | 1,299 |
-| 7 | 4 | 10 — Kurta Set | 1 | 2,499 | 600 | 1,899 |
-| 8 | 4 | 9 — Chino Trousers | 1 | 1,899 | 0 | 1,899 |
-| 9 | 5 | 3 — Logitech Mouse | 1 | 8,999 | 500 | 8,499 |
-| 10 | 5 | 4 — Keyboard | 1 | 4,499 | 3,500 | 999 |
+| 1 | 1 | Samsung Galaxy S24 | 1 | 74,999 | 1,000 | 73,999 |
+| 2 | 1 | Anker GaN Charger | 1 | 2,999 | 500 | 2,499 |
+| 3 | 2 | iPhone 15 | 1 | 79,999 | 0 | 79,999 |
+| 4 | 3 | Dell Inspiron 15 | 1 | 65,999 | 500 | 65,499 |
+| 5 | 3 | Logitech MX Master 3 | 1 | 8,999 | 1,000 | 7,999 |
+| 6 | 3 | Mechanical Keyboard RGB | 1 | 4,499 | 3,200 | 1,299 |
 
 ---
 
-## 6. reviews
+### 6. reviews
 
 Customer reviews per product. One review per customer per product enforced by `UNIQUE` constraint.
 
-### Schema
+#### Schema
 
 ```sql
 CREATE TABLE reviews (
@@ -423,7 +527,7 @@ CREATE TABLE reviews (
 );
 ```
 
-### Column Reference
+#### Column Reference
 
 | Column | Type | Notes |
 |---|---|---|
@@ -437,28 +541,28 @@ CREATE TABLE reviews (
 | `helpful_count` | INT | Number of "helpful" votes |
 | `created_at` | TIMESTAMP | Auto-set on insert |
 
-### Insert Statements
+#### Insert Statements
 
 ```sql
 INSERT INTO reviews (product_id, customer_id, rating, title, body, is_verified, helpful_count) VALUES
-    (5,  1, 5, 'Absolutely love this phone!',   'The Galaxy S24 camera is stunning. Battery life is excellent and display is super vibrant.',          TRUE, 14),
-    (6,  2, 5, 'Best iPhone yet',               'Smooth performance, great camera system. iOS 17 feels polished. Totally worth the price.',            TRUE, 22),
-    (1,  3, 4, 'Great laptop for the price',    'Dell Inspiron handles multitasking well. Thermal management could be better under heavy load.',       TRUE,  9),
-    (10, 4, 5, 'Beautiful kurta set',           'Quality fabric, stitching is excellent and the colour is exactly as shown. Will buy again.',          TRUE,  7),
-    (3,  5, 5, 'Best mouse I have ever used',   'The MX Master 3 is incredibly precise. The scroll wheel alone is worth the upgrade.',                 TRUE, 18),
-    (19, 7, 5, 'Worth every rupee',             'Sony XM5 noise cancellation is on another level. Perfect for flights and open offices.',              TRUE, 31),
-    (13, 8, 4, 'Great book, changed my habits', 'Atomic Habits is genuinely practical. Some chapters feel repetitive but the core message is solid.',  TRUE,  6),
-    (17, 9, 5, 'Kids absolutely love it',       'LEGO Classic set kept my 6-year-old busy for days. Pieces are sturdy and well-designed.',             TRUE, 11),
-    (15, 6, 3, 'Decent yoga mat',               'Good grip on smooth floors but slightly slippery on tiles. Thickness is fine for light yoga.',        TRUE,  4),
-    (7,  10,5, 'OnePlus at its best',           'Blazing fast, gorgeous display and Hasselblad camera is exceptional. Best phone under 70k easily.',   TRUE, 19),
-    (4,  1, 4, 'Solid mechanical keyboard',     'Tactile feedback is satisfying. RGB lighting is beautiful. Slightly loud for office use.',            TRUE,  8),
-    (20, 2, 5, 'Compact and fast charger',      'Anker GaN charger charges my laptop and phone simultaneously. Runs barely warm. Excellent build.',    TRUE, 13),
-    (12, 3, 4, 'Heats water fast',              'Philips kettle boils 1.7L in under 4 minutes. Auto shut-off works perfectly. Good value.',           TRUE,  5),
-    (16, 4, 5, 'Perfect resistance bands',      'All five resistance levels are clearly differentiated. Great for home workouts. Durable material.',   TRUE,  9),
-    (14, 5, 5, 'A timeless classic',            'The Alchemist never gets old. Beautiful storytelling and a powerful message about following dreams.', FALSE, 3);
+    (5,  1,  5, 'Absolutely love this phone!',   'The Galaxy S24 camera is stunning. Battery life is excellent and display is super vibrant.',          TRUE, 14),
+    (6,  2,  5, 'Best iPhone yet',               'Smooth performance, great camera system. iOS 17 feels polished. Totally worth the price.',            TRUE, 22),
+    (1,  3,  4, 'Great laptop for the price',    'Dell Inspiron handles multitasking well. Thermal management could be better under heavy load.',       TRUE,  9),
+    (10, 4,  5, 'Beautiful kurta set',           'Quality fabric, stitching is excellent and the colour is exactly as shown. Will buy again.',          TRUE,  7),
+    (3,  5,  5, 'Best mouse I have ever used',   'The MX Master 3 is incredibly precise. The scroll wheel alone is worth the upgrade.',                 TRUE, 18),
+    (19, 7,  5, 'Worth every rupee',             'Sony XM5 noise cancellation is on another level. Perfect for flights and open offices.',              TRUE, 31),
+    (13, 8,  4, 'Great book, changed my habits', 'Atomic Habits is genuinely practical. Some chapters feel repetitive but the core message is solid.',  TRUE,  6),
+    (17, 9,  5, 'Kids absolutely love it',       'LEGO Classic set kept my 6-year-old busy for days. Pieces are sturdy and well-designed.',             TRUE, 11),
+    (15, 6,  3, 'Decent yoga mat',               'Good grip on smooth floors but slightly slippery on tiles. Thickness is fine for light yoga.',        TRUE,  4),
+    (7,  10, 5, 'OnePlus at its best',           'Blazing fast, gorgeous display and Hasselblad camera is exceptional. Best phone under 70k easily.',   TRUE, 19),
+    (4,  1,  4, 'Solid mechanical keyboard',     'Tactile feedback is satisfying. RGB lighting is beautiful. Slightly loud for office use.',            TRUE,  8),
+    (20, 2,  5, 'Compact and fast charger',      'Anker GaN charger charges my laptop and phone simultaneously. Runs barely warm. Excellent build.',    TRUE, 13),
+    (12, 3,  4, 'Heats water fast',              'Philips kettle boils 1.7L in under 4 minutes. Auto shut-off works perfectly. Good value.',           TRUE,  5),
+    (16, 4,  5, 'Perfect resistance bands',      'All five resistance levels are clearly differentiated. Great for home workouts. Durable material.',   TRUE,  9),
+    (14, 5,  5, 'A timeless classic',            'The Alchemist never gets old. Beautiful storytelling and a powerful message about following dreams.', FALSE, 3);
 ```
 
-### Sample Data
+#### Sample Data
 
 | review_id | product | customer | rating | title | verified |
 |---|---|---|---|---|---|
@@ -468,18 +572,12 @@ INSERT INTO reviews (product_id, customer_id, rating, title, body, is_verified, 
 | 4 | Women's Kurta Set | Sneha Patel | ⭐⭐⭐⭐⭐ | Beautiful kurta set | ✓ |
 | 5 | Logitech MX Master 3 | Karan Singh | ⭐⭐⭐⭐⭐ | Best mouse I have ever used | ✓ |
 | 6 | Sony WH-1000XM5 | Vikram Joshi | ⭐⭐⭐⭐⭐ | Worth every rupee | ✓ |
-| 7 | Atomic Habits | Ananya Reddy | ⭐⭐⭐⭐ | Great book, changed my habits | ✓ |
-| 8 | LEGO Classic Bricks | Manish Gupta | ⭐⭐⭐⭐⭐ | Kids absolutely love it | ✓ |
-| 9 | Yoga Mat 6mm | Divya Nair | ⭐⭐⭐ | Decent yoga mat | ✓ |
-| 10 | OnePlus 12 | Pooja Kulkarni | ⭐⭐⭐⭐⭐ | OnePlus at its best | ✓ |
 
 ---
 
-## Bonus Views
+### Bonus Views
 
-### v_top_rated_products
-
-Returns products ranked by average customer rating.
+#### v_top_rated_products
 
 ```sql
 CREATE VIEW v_top_rated_products AS
@@ -496,9 +594,7 @@ GROUP BY p.product_id, p.name, p.brand, p.price
 ORDER BY avg_rating DESC, review_count DESC;
 ```
 
-### v_customer_order_summary
-
-Returns lifetime value and order history per customer.
+#### v_customer_order_summary
 
 ```sql
 CREATE VIEW v_customer_order_summary AS
@@ -517,10 +613,85 @@ ORDER BY lifetime_value DESC;
 
 ---
 
-## MCP Prompts & SQL Queries
+## Step 4 — Google ADK Agent Script
 
-Ready-to-use natural language prompts and their matching PostgreSQL queries.  
-All tables are prefixed with `productsdb.` schema.
+Install dependencies first:
+
+```bash
+pip install google-adk python-dotenv
+```
+
+Create a `.env` file:
+
+```env
+GOOGLE_API_KEY=your_google_api_key_here
+```
+
+**`agent.py`:**
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StdioServerParameters
+from dotenv import load_dotenv
+load_dotenv()
+
+
+root_agent = LlmAgent(
+    model="gemini-2.5-flash",
+    name="root_agent",
+    description="Queries a PostgreSQL database using natural language.",
+    instruction=(
+        "You are a database assistant with LIVE access to a PostgreSQL database.\n"
+        "You have a tool available that can execute SQL queries directly. USE IT.\n\n"
+
+        "Database: 'postgres'. Tables are in the public schema — use plain table names, no prefix.\n"
+        "Exact table names and columns:\n"
+        "  - categories  → category_id, name, description, parent_id\n"
+        "  - customers   → customer_id, first_name, last_name, email, phone, city, state\n"
+        "  - products    → product_id, category_id, name, description, price, stock_qty, sku, brand, is_active\n"
+        "  - orders      → order_id, customer_id, status, total_amount, payment_method, payment_status, ordered_at, delivered_at\n"
+        "  - order_items → order_item_id, order_id, product_id, quantity, unit_price, discount, subtotal\n"
+        "  - reviews     → review_id, product_id, customer_id, rating, title, body, is_verified\n\n"
+
+        "STRICT RULES — NEVER break these:\n"
+        "  1. ALWAYS call your database tool to execute the SQL query — NEVER just show or explain SQL\n"
+        "  2. Use plain table names — e.g. SELECT * FROM products (no schema prefix needed)\n"
+        "  3. NEVER fabricate or guess data — always query the database\n"
+        "  4. NEVER say 'here is a query you could run' — run it yourself using the tool\n"
+        "  5. NEVER say you lack database access\n"
+        "  6. Present results as a clean formatted table or list\n"
+    ),
+    tools=[
+        MCPToolset(
+            connection_params=StdioServerParameters(
+                command="docker",
+                args=[
+                    "run", "-i", "--rm",
+                    "--add-host", "host.docker.internal:host-gateway",
+                    "-e", "PGEDGE_DB_HOST=host.docker.internal",
+                    "-e", "PGEDGE_DB_PORT=5432",
+                    "-e", "PGEDGE_DB_NAME=postgres",
+                    "-e", "PGEDGE_DB_USER=postgres",
+                    "-e", "PGEDGE_DB_PASSWORD=postgres123",
+                    "ghcr.io/pgedge/postgres-mcp:latest",
+                ],
+            ),
+        ),
+    ],
+)
+```
+
+**Run the agent:**
+
+```bash
+adk web
+```
+
+---
+
+## Step 5 — MCP Prompts & SQL Queries
+
+> All queries use plain table names (public schema). No prefix needed.
 
 ---
 
@@ -530,13 +701,13 @@ All tables are prefixed with `productsdb.` schema.
 ```sql
 SELECT
     p.product_id,
-    p.name          AS product_name,
-    c.name          AS category,
+    p.name       AS product_name,
+    c.name       AS category,
     p.brand,
     p.price,
     p.stock_qty
-FROM productsdb.products p
-JOIN productsdb.categories c ON p.category_id = c.category_id
+FROM products p
+JOIN categories c ON p.category_id = c.category_id
 ORDER BY c.name, p.name;
 ```
 
@@ -551,7 +722,7 @@ SELECT
     city,
     state,
     pincode
-FROM productsdb.customers
+FROM customers
 ORDER BY state, city;
 ```
 
@@ -566,8 +737,8 @@ SELECT
     o.total_amount,
     o.payment_method,
     o.ordered_at
-FROM productsdb.orders o
-JOIN productsdb.customers c ON o.customer_id = c.customer_id
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
 WHERE o.ordered_at BETWEEN '2024-11-01' AND '2024-11-30'
 ORDER BY o.ordered_at;
 ```
@@ -583,8 +754,8 @@ SELECT
     p.price,
     p.stock_qty,
     p.sku
-FROM productsdb.products p
-JOIN productsdb.categories c ON p.category_id = c.category_id
+FROM products p
+JOIN categories c ON p.category_id = c.category_id
 WHERE c.name = 'Electronics'
   AND p.is_active = TRUE
 ORDER BY p.price DESC;
@@ -594,7 +765,7 @@ ORDER BY p.price DESC;
 
 ### Filtering & Searching
 
-**"Find all products priced between ₹1000 and ₹10000 sorted by price"**
+**"Find all products priced between ₹1000 and ₹10000"**
 ```sql
 SELECT
     p.name,
@@ -602,8 +773,8 @@ SELECT
     c.name  AS category,
     p.price,
     p.stock_qty
-FROM productsdb.products p
-JOIN productsdb.categories c ON p.category_id = c.category_id
+FROM products p
+JOIN categories c ON p.category_id = c.category_id
 WHERE p.price BETWEEN 1000 AND 10000
 ORDER BY p.price ASC;
 ```
@@ -619,14 +790,14 @@ SELECT
     phone,
     city,
     pincode
-FROM productsdb.customers
+FROM customers
 WHERE state = 'Maharashtra'
 ORDER BY city;
 ```
 
 ---
 
-**"Show me all orders that have been cancelled or refunded"**
+**"Show all cancelled or refunded orders"**
 ```sql
 SELECT
     o.order_id,
@@ -636,15 +807,15 @@ SELECT
     o.payment_method,
     o.payment_status,
     o.ordered_at
-FROM productsdb.orders o
-JOIN productsdb.customers c ON o.customer_id = c.customer_id
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
 WHERE o.status IN ('cancelled', 'refunded')
 ORDER BY o.ordered_at DESC;
 ```
 
 ---
 
-**"Find products with stock below 50 that may need reordering"**
+**"Find products with stock below 50 — may need reordering"**
 ```sql
 SELECT
     p.product_id,
@@ -653,8 +824,8 @@ SELECT
     p.brand,
     c.name  AS category,
     p.stock_qty
-FROM productsdb.products p
-JOIN productsdb.categories c ON p.category_id = c.category_id
+FROM products p
+JOIN categories c ON p.category_id = c.category_id
 WHERE p.stock_qty < 50
   AND p.is_active = TRUE
 ORDER BY p.stock_qty ASC;
@@ -667,17 +838,17 @@ ORDER BY p.stock_qty ASC;
 **"What is the total revenue from delivered orders?"**
 ```sql
 SELECT
-    COUNT(order_id)       AS total_orders,
-    SUM(total_amount)     AS total_revenue,
+    COUNT(order_id)             AS total_orders,
+    SUM(total_amount)           AS total_revenue,
     ROUND(AVG(total_amount), 2) AS avg_order_value
-FROM productsdb.orders
+FROM orders
 WHERE status = 'delivered'
   AND payment_status = 'paid';
 ```
 
 ---
 
-**"Which product has been ordered the most times?"**
+**"Which product has been ordered the most?"**
 ```sql
 SELECT
     p.product_id,
@@ -685,8 +856,8 @@ SELECT
     p.brand,
     COUNT(oi.order_item_id) AS times_ordered,
     SUM(oi.quantity)        AS total_units_sold
-FROM productsdb.order_items oi
-JOIN productsdb.products p ON oi.product_id = p.product_id
+FROM order_items oi
+JOIN products p ON oi.product_id = p.product_id
 GROUP BY p.product_id, p.name, p.brand
 ORDER BY total_units_sold DESC
 LIMIT 5;
@@ -700,10 +871,10 @@ SELECT
     c.customer_id,
     c.first_name || ' ' || c.last_name AS customer_name,
     c.city,
-    COUNT(o.order_id)       AS total_orders,
-    SUM(o.total_amount)     AS lifetime_value
-FROM productsdb.customers c
-JOIN productsdb.orders o ON c.customer_id = o.customer_id
+    COUNT(o.order_id)   AS total_orders,
+    SUM(o.total_amount) AS lifetime_value
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
 WHERE o.status != 'cancelled'
 GROUP BY c.customer_id, c.first_name, c.last_name, c.city
 ORDER BY lifetime_value DESC
@@ -712,7 +883,7 @@ LIMIT 5;
 
 ---
 
-**"What is the average rating for each product with at least one review?"**
+**"Average rating per product"**
 ```sql
 SELECT
     p.product_id,
@@ -720,24 +891,23 @@ SELECT
     p.brand,
     ROUND(AVG(r.rating), 2) AS avg_rating,
     COUNT(r.review_id)      AS review_count,
-    MIN(r.rating)           AS lowest_rating,
-    MAX(r.rating)           AS highest_rating
-FROM productsdb.products p
-JOIN productsdb.reviews r ON p.product_id = r.product_id
+    MIN(r.rating)           AS lowest,
+    MAX(r.rating)           AS highest
+FROM products p
+JOIN reviews r ON p.product_id = r.product_id
 GROUP BY p.product_id, p.name, p.brand
-HAVING COUNT(r.review_id) >= 1
 ORDER BY avg_rating DESC;
 ```
 
 ---
 
-**"How many orders are in each status?"**
+**"Order count breakdown by status"**
 ```sql
 SELECT
     status,
-    COUNT(order_id)     AS order_count,
-    SUM(total_amount)   AS total_value
-FROM productsdb.orders
+    COUNT(order_id)   AS order_count,
+    SUM(total_amount) AS total_value
+FROM orders
 GROUP BY status
 ORDER BY order_count DESC;
 ```
@@ -746,22 +916,22 @@ ORDER BY order_count DESC;
 
 ### Joins Across Tables
 
-**"Show each order with customer name, products ordered, and total"**
+**"Show each order with customer name and all products ordered"**
 ```sql
 SELECT
     o.order_id,
-    c.first_name || ' ' || c.last_name  AS customer_name,
-    p.name                               AS product,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    p.name                              AS product,
     oi.quantity,
     oi.unit_price,
     oi.discount,
     oi.subtotal,
     o.status,
     o.ordered_at
-FROM productsdb.orders o
-JOIN productsdb.customers c    ON o.customer_id  = c.customer_id
-JOIN productsdb.order_items oi ON o.order_id     = oi.order_id
-JOIN productsdb.products p     ON oi.product_id  = p.product_id
+FROM orders o
+JOIN customers c    ON o.customer_id  = c.customer_id
+JOIN order_items oi ON o.order_id     = oi.order_id
+JOIN products p     ON oi.product_id  = p.product_id
 ORDER BY o.order_id, p.name;
 ```
 
@@ -774,14 +944,14 @@ SELECT
     c.first_name || ' ' || c.last_name AS customer_name,
     c.email,
     c.city
-FROM productsdb.customers c
-LEFT JOIN productsdb.orders o ON c.customer_id = o.customer_id
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id
 WHERE o.order_id IS NULL;
 ```
 
 ---
 
-**"List all reviews with reviewer name, product, rating and title"**
+**"List all reviews with reviewer name, product, rating"**
 ```sql
 SELECT
     r.review_id,
@@ -791,11 +961,10 @@ SELECT
     r.rating,
     r.title,
     r.is_verified,
-    r.helpful_count,
-    r.created_at
-FROM productsdb.reviews r
-JOIN productsdb.customers c ON r.customer_id = c.customer_id
-JOIN productsdb.products p  ON r.product_id  = p.product_id
+    r.helpful_count
+FROM reviews r
+JOIN customers c ON r.customer_id = c.customer_id
+JOIN products p  ON r.product_id  = p.product_id
 ORDER BY r.rating DESC, r.helpful_count DESC;
 ```
 
@@ -805,16 +974,16 @@ ORDER BY r.rating DESC, r.helpful_count DESC;
 ```sql
 SELECT
     o.order_id,
-    c.first_name || ' ' || c.last_name AS customer_name,
-    p.name                              AS product,
+    c.first_name || ' ' || c.last_name             AS customer_name,
+    p.name                                          AS product,
     oi.unit_price,
     oi.discount,
     oi.subtotal,
-    ROUND((oi.discount / oi.unit_price) * 100, 1) AS discount_pct
-FROM productsdb.order_items oi
-JOIN productsdb.orders o    ON oi.order_id    = o.order_id
-JOIN productsdb.customers c ON o.customer_id  = c.customer_id
-JOIN productsdb.products p  ON oi.product_id  = p.product_id
+    ROUND((oi.discount / oi.unit_price) * 100, 1)  AS discount_pct
+FROM order_items oi
+JOIN orders o    ON oi.order_id   = o.order_id
+JOIN customers c ON o.customer_id = c.customer_id
+JOIN products p  ON oi.product_id = p.product_id
 WHERE oi.discount > 0
 ORDER BY oi.discount DESC;
 ```
@@ -826,13 +995,13 @@ ORDER BY oi.discount DESC;
 **"Which category has generated the most revenue?"**
 ```sql
 SELECT
-    c.name              AS category,
-    COUNT(DISTINCT o.order_id)  AS total_orders,
-    SUM(oi.subtotal)             AS total_revenue
-FROM productsdb.order_items oi
-JOIN productsdb.products p     ON oi.product_id  = p.product_id
-JOIN productsdb.categories c   ON p.category_id  = c.category_id
-JOIN productsdb.orders o       ON oi.order_id    = o.order_id
+    c.name                     AS category,
+    COUNT(DISTINCT o.order_id) AS total_orders,
+    SUM(oi.subtotal)           AS total_revenue
+FROM order_items oi
+JOIN products p    ON oi.product_id = p.product_id
+JOIN categories c  ON p.category_id = c.category_id
+JOIN orders o      ON oi.order_id   = o.order_id
 WHERE o.status != 'cancelled'
 GROUP BY c.name
 ORDER BY total_revenue DESC;
@@ -840,16 +1009,16 @@ ORDER BY total_revenue DESC;
 
 ---
 
-**"Show products that have been ordered but never reviewed"**
+**"Products ordered but never reviewed"**
 ```sql
 SELECT
     p.product_id,
     p.name,
     p.brand,
     COUNT(oi.order_item_id) AS times_ordered
-FROM productsdb.products p
-JOIN productsdb.order_items oi ON p.product_id = oi.product_id
-LEFT JOIN productsdb.reviews r  ON p.product_id = r.product_id
+FROM products p
+JOIN order_items oi ON p.product_id = oi.product_id
+LEFT JOIN reviews r  ON p.product_id = r.product_id
 WHERE r.review_id IS NULL
 GROUP BY p.product_id, p.name, p.brand
 ORDER BY times_ordered DESC;
@@ -857,14 +1026,14 @@ ORDER BY times_ordered DESC;
 
 ---
 
-**"What is the average order value per payment method?"**
+**"Average order value per payment method"**
 ```sql
 SELECT
     payment_method,
     COUNT(order_id)             AS total_orders,
     ROUND(AVG(total_amount), 2) AS avg_order_value,
     SUM(total_amount)           AS total_revenue
-FROM productsdb.orders
+FROM orders
 WHERE payment_status = 'paid'
 GROUP BY payment_method
 ORDER BY total_revenue DESC;
@@ -872,15 +1041,15 @@ ORDER BY total_revenue DESC;
 
 ---
 
-**"Which brand has the highest average product rating?"**
+**"Which brand has the highest average rating?"**
 ```sql
 SELECT
     p.brand,
-    COUNT(DISTINCT p.product_id)    AS products_reviewed,
-    ROUND(AVG(r.rating), 2)         AS avg_rating,
-    COUNT(r.review_id)              AS total_reviews
-FROM productsdb.products p
-JOIN productsdb.reviews r ON p.product_id = r.product_id
+    COUNT(DISTINCT p.product_id) AS products_reviewed,
+    ROUND(AVG(r.rating), 2)      AS avg_rating,
+    COUNT(r.review_id)           AS total_reviews
+FROM products p
+JOIN reviews r ON p.product_id = r.product_id
 GROUP BY p.brand
 HAVING COUNT(r.review_id) >= 2
 ORDER BY avg_rating DESC;
@@ -888,7 +1057,7 @@ ORDER BY avg_rating DESC;
 
 ---
 
-**"Find customers who have placed more than one order"**
+**"Customers with more than one order"**
 ```sql
 SELECT
     c.customer_id,
@@ -897,8 +1066,8 @@ SELECT
     c.city,
     COUNT(o.order_id)   AS order_count,
     SUM(o.total_amount) AS lifetime_value
-FROM productsdb.customers c
-JOIN productsdb.orders o ON c.customer_id = o.customer_id
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
 GROUP BY c.customer_id, c.first_name, c.last_name, c.email, c.city
 HAVING COUNT(o.order_id) > 1
 ORDER BY order_count DESC;
@@ -908,15 +1077,15 @@ ORDER BY order_count DESC;
 
 ### Data Integrity Checks
 
-**"Are there order totals that don't match the sum of their order_items?"**
+**"Order totals that don't match sum of their line items"**
 ```sql
 SELECT
     o.order_id,
     o.total_amount              AS recorded_total,
     SUM(oi.subtotal)            AS calculated_total,
     o.total_amount - SUM(oi.subtotal) AS difference
-FROM productsdb.orders o
-JOIN productsdb.order_items oi ON o.order_id = oi.order_id
+FROM orders o
+JOIN order_items oi ON o.order_id = oi.order_id
 GROUP BY o.order_id, o.total_amount
 HAVING o.total_amount != SUM(oi.subtotal)
 ORDER BY difference DESC;
@@ -924,7 +1093,23 @@ ORDER BY difference DESC;
 
 ---
 
-**"Show products that have reviews but are currently inactive"**
+**"Delivered orders with NULL delivered_at"**
+```sql
+SELECT
+    o.order_id,
+    c.first_name || ' ' || c.last_name AS customer_name,
+    o.status,
+    o.ordered_at,
+    o.delivered_at
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE o.status = 'delivered'
+  AND o.delivered_at IS NULL;
+```
+
+---
+
+**"Products with reviews but currently inactive"**
 ```sql
 SELECT
     p.product_id,
@@ -933,26 +1118,10 @@ SELECT
     p.is_active,
     COUNT(r.review_id)      AS review_count,
     ROUND(AVG(r.rating), 2) AS avg_rating
-FROM productsdb.products p
-JOIN productsdb.reviews r ON p.product_id = r.product_id
+FROM products p
+JOIN reviews r ON p.product_id = r.product_id
 WHERE p.is_active = FALSE
 GROUP BY p.product_id, p.name, p.brand, p.is_active;
-```
-
----
-
-**"Find delivered orders with a NULL delivered_at timestamp"**
-```sql
-SELECT
-    o.order_id,
-    c.first_name || ' ' || c.last_name AS customer_name,
-    o.status,
-    o.ordered_at,
-    o.delivered_at
-FROM productsdb.orders o
-JOIN productsdb.customers c ON o.customer_id = c.customer_id
-WHERE o.status = 'delivered'
-  AND o.delivered_at IS NULL;
 ```
 
 ---
