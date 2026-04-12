@@ -320,25 +320,87 @@ Update MCP config:
 "MYSQL_USER": "devuser",
 "MYSQL_PASS": "dev123"
 ```
-# prompts for testing
+# MySQL MCP Agent — Test Prompts & SQL Queries
+
+## Prompt 1: Employee Details with Department
+
+**Prompt:**
+> Show me all employees along with their department names and locations, sorted by salary in descending order.
+
+**SQL:**
+```sql
+SELECT e.emp_name, e.email, e.salary, d.dept_name, d.location
+FROM employee e
+JOIN department d ON e.dept_id = d.dept_id
+ORDER BY e.salary DESC;
 ```
-"Show me all employees along with their department names and locations, sorted by salary in descending order."
-This tests a basic JOIN between employee and department tables with ordering.
-"Which department has the highest total salary expenditure? Show department name, location, number of employees, and total salary."
-This tests aggregation (SUM, COUNT), GROUP BY, and ORDER BY with a JOIN.
-"List all employees who are working on projects with a budget greater than 500000, along with their project name, role, and project budget."
-This tests a multi-table JOIN across employee, employee_project, and project with a WHERE filter.
-"Are there any departments that have no employees assigned to any project? Show the department name and the employee names."
-This tests LEFT JOIN logic and NULL checking across three tables — useful for finding gaps in assignments.
-"Give me a summary report: for each project, show the project name, budget, number of team members, and list of employee names working on it."
-This tests GROUP_CONCAT, COUNT, and a multi-table JOIN — a good real-world reporting scenario.
-```
+
 ---
 
-If you want, I can also provide:
+## Prompt 2: Department Salary Expenditure
 
-* ER diagram
-* Spring Boot JPA entities
-* Flyway migration script
-* MCP automation to auto-create tables
-* Docker compose for MySQL + MCP
+**Prompt:**
+> Which department has the highest total salary expenditure? Show department name, location, number of employees, and total salary.
+
+**SQL:**
+```sql
+SELECT d.dept_name, d.location,
+       COUNT(e.emp_id) AS num_employees,
+       SUM(e.salary) AS total_salary
+FROM department d
+JOIN employee e ON d.dept_id = e.dept_id
+GROUP BY d.dept_id, d.dept_name, d.location
+ORDER BY total_salary DESC;
+```
+
+---
+
+## Prompt 3: Employees on High-Budget Projects
+
+**Prompt:**
+> List all employees who are working on projects with a budget greater than 500000, along with their project name, role, and project budget.
+
+**SQL:**
+```sql
+SELECT e.emp_name, p.project_name, ep.role, p.budget
+FROM employee e
+JOIN employee_project ep ON e.emp_id = ep.emp_id
+JOIN project p ON ep.project_id = p.project_id
+WHERE p.budget > 500000
+ORDER BY p.budget DESC;
+```
+
+---
+
+## Prompt 4: Unassigned Employees
+
+**Prompt:**
+> Are there any departments that have no employees assigned to any project? Show the department name and the employee names.
+
+**SQL:**
+```sql
+SELECT d.dept_name, e.emp_name
+FROM department d
+JOIN employee e ON d.dept_id = e.dept_id
+LEFT JOIN employee_project ep ON e.emp_id = ep.emp_id
+WHERE ep.id IS NULL;
+```
+
+---
+
+## Prompt 5: Project Summary Report
+
+**Prompt:**
+> Give me a summary report: for each project, show the project name, budget, number of team members, and list of employee names working on it.
+
+**SQL:**
+```sql
+SELECT p.project_name, p.budget,
+       COUNT(ep.emp_id) AS team_size,
+       GROUP_CONCAT(e.emp_name SEPARATOR ', ') AS team_members
+FROM project p
+JOIN employee_project ep ON p.project_id = ep.project_id
+JOIN employee e ON ep.emp_id = e.emp_id
+GROUP BY p.project_id, p.project_name, p.budget
+ORDER BY p.budget DESC;
+```
