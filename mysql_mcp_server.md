@@ -320,7 +320,19 @@ Update MCP config:
 "MYSQL_USER": "devuser",
 "MYSQL_PASS": "dev123"
 ```
-
+# prompts for testing
+```
+"Show me all employees along with their department names and locations, sorted by salary in descending order."
+This tests a basic JOIN between employee and department tables with ordering.
+"Which department has the highest total salary expenditure? Show department name, location, number of employees, and total salary."
+This tests aggregation (SUM, COUNT), GROUP BY, and ORDER BY with a JOIN.
+"List all employees who are working on projects with a budget greater than 500000, along with their project name, role, and project budget."
+This tests a multi-table JOIN across employee, employee_project, and project with a WHERE filter.
+"Are there any departments that have no employees assigned to any project? Show the department name and the employee names."
+This tests LEFT JOIN logic and NULL checking across three tables — useful for finding gaps in assignments.
+"Give me a summary report: for each project, show the project name, budget, number of team members, and list of employee names working on it."
+This tests GROUP_CONCAT, COUNT, and a multi-table JOIN — a good real-world reporting scenario.
+```
 ---
 
 If you want, I can also provide:
